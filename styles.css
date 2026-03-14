@@ -552,6 +552,37 @@ nav a:hover {
   padding: 0 2rem;
 }
 
+.gallery-admin-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.6rem;
+}
+
+.gallery-admin-btn {
+  border: 1px solid var(--input-border);
+  border-radius: 999px;
+  background: var(--bg-alt);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.4rem 0.72rem;
+  cursor: pointer;
+}
+
+.gallery-admin-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.gallery-admin-status {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
 .gallery-search-label {
   display: block;
   font-size: 0.82rem;
@@ -676,6 +707,11 @@ nav a:hover {
   padding: 0.28rem 0.62rem;
   cursor: pointer;
   transition: border-color 0.2s, color 0.2s, background 0.2s;
+  display: none;
+}
+
+.is-admin-unlocked .poem-delete-btn {
+  display: inline-flex;
 }
 
 .poem-delete-btn:hover {

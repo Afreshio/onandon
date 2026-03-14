@@ -6,6 +6,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 8000);
 const DATA_DIR = path.join(__dirname, 'data');
 const POEMS_PATH = path.join(DATA_DIR, 'poems.json');
+const ADMIN_DELETE_TOKEN = String(process.env.ADMIN_DELETE_TOKEN || '').trim();
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 const poemsStore = loadPoemsStore();
@@ -19,6 +20,10 @@ app.get('/api/poems', (_req, res) => {
     .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
     .slice(0, 100);
   res.json(poems);
+});
+
+app.get('/api/admin/config', (_req, res) => {
+  res.json({ deleteConfigured: Boolean(ADMIN_DELETE_TOKEN) });
 });
 
 app.post('/api/poems', (req, res) => {
@@ -49,6 +54,15 @@ app.post('/api/poems', (req, res) => {
 });
 
 app.delete('/api/poems/:id', (req, res) => {
+  if (!ADMIN_DELETE_TOKEN) {
+    res.status(503).json({ error: 'Admin delete token is not configured on the server.' });
+    return;
+  }
+  if (!isAdminAuthorized(req)) {
+    res.status(403).json({ error: 'Admin authorization required.' });
+    return;
+  }
+
   const id = String(req.params.id || '').trim();
   if (!id) {
     res.status(400).json({ error: 'Poem id is required.' });
@@ -111,4 +125,9 @@ function persistPoemsStore(poems) {
   } catch {
     return false;
   }
+}
+
+function isAdminAuthorized(req) {
+  const suppliedToken = String(req.get('x-admin-token') || '').trim();
+  return suppliedToken.length > 0 && suppliedToken === ADMIN_DELETE_TOKEN;
 }

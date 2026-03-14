@@ -3,11 +3,16 @@
  */
 
 const SAVED_POEMS_KEY = 'onandon_saved_poems';
+const ADMIN_TOKEN_KEY = 'onandon_admin_delete_token';
 const API_POEMS_ENDPOINT = '/api/poems';
+const API_ADMIN_CONFIG_ENDPOINT = '/api/admin/config';
+let adminToken = sessionStorage.getItem(ADMIN_TOKEN_KEY) || '';
+let deleteConfigured = false;
 
 initGallery();
 
 async function initGallery() {
+  await initAdminControls();
   await hydrateSavedPoems();
   const poemBlocks = Array.from(document.querySelectorAll('[data-poem]'));
   const refreshActivePoem = initScrollDimming(poemBlocks);
@@ -154,6 +159,10 @@ function initDeletePoems(blocks, refreshActivePoem, applySearch) {
     if (!article) return;
     const poemId = String(article.dataset.poemId || '').trim();
     if (!poemId) return;
+    if (!isAdminUnlocked()) {
+      window.alert('Unlock admin mode before deleting poems.');
+      return;
+    }
 
     const confirmed = window.confirm('Remove this poem from the gallery?');
     if (!confirmed) return;
@@ -171,7 +180,7 @@ function initDeletePoems(blocks, refreshActivePoem, applySearch) {
       if (typeof refreshActivePoem === 'function') refreshActivePoem();
     } catch {
       deleteBtn.removeAttribute('disabled');
-      window.alert('Could not delete poem. Please try again.');
+      window.alert('Could not delete poem. Check admin token and try again.');
     }
   });
 }
@@ -219,10 +228,69 @@ async function loadPoems() {
 }
 
 async function deletePoem(id) {
+  if (!isAdminUnlocked()) throw new Error('Admin authorization required');
   const response = await fetch(`${API_POEMS_ENDPOINT}/${encodeURIComponent(id)}`, {
     method: 'DELETE',
+    headers: {
+      'x-admin-token': adminToken,
+    },
   });
   if (!response.ok) throw new Error('Request failed');
+}
+
+async function initAdminControls() {
+  const adminButton = document.getElementById('admin-toggle');
+  const adminStatus = document.getElementById('admin-status');
+  if (!adminButton || !adminStatus) return;
+
+  deleteConfigured = await fetchDeleteConfig();
+  applyAdminUiState(adminButton, adminStatus);
+
+  adminButton.addEventListener('click', () => {
+    if (!deleteConfigured) {
+      window.alert('Admin delete token is not configured on the server yet.');
+      return;
+    }
+
+    if (isAdminUnlocked()) {
+      adminToken = '';
+      sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+      applyAdminUiState(adminButton, adminStatus);
+      return;
+    }
+
+    const value = window.prompt('Enter admin delete token');
+    if (!value) return;
+    adminToken = value.trim();
+    sessionStorage.setItem(ADMIN_TOKEN_KEY, adminToken);
+    applyAdminUiState(adminButton, adminStatus);
+  });
+}
+
+async function fetchDeleteConfig() {
+  try {
+    const response = await fetch(API_ADMIN_CONFIG_ENDPOINT);
+    if (!response.ok) return false;
+    const payload = await response.json();
+    return Boolean(payload && payload.deleteConfigured);
+  } catch {
+    return false;
+  }
+}
+
+function isAdminUnlocked() {
+  return Boolean(adminToken);
+}
+
+function applyAdminUiState(adminButton, adminStatus) {
+  const unlocked = isAdminUnlocked();
+  document.body.classList.toggle('is-admin-unlocked', unlocked);
+  adminButton.textContent = unlocked ? 'Admin lock' : 'Admin unlock';
+  if (!deleteConfigured) {
+    adminStatus.textContent = 'Admin delete not configured';
+    return;
+  }
+  adminStatus.textContent = unlocked ? 'Admin unlocked' : 'Admin locked';
 }
 
 function loadSavedPoems() {

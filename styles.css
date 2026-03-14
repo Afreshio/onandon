@@ -563,25 +563,30 @@ nav a:hover {
   justify-content: space-between;
   gap: 0.75rem;
   pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.gallery-admin-row:hover,
+.gallery-admin-row:focus-within {
+  opacity: 1;
 }
 
 .gallery-admin-btn {
-  border: 1px solid var(--input-border);
-  border-radius: 999px;
-  background: var(--bg-alt);
+  border: none;
+  background: transparent;
   color: var(--text-muted);
   font-family: inherit;
   font-size: 0.75rem;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  padding: 0.4rem 0.72rem;
+  padding: 0;
   cursor: pointer;
   pointer-events: auto;
 }
 
 .gallery-admin-btn:hover {
   color: var(--text);
-  border-color: var(--accent);
 }
 
 .gallery-admin-status {
@@ -590,10 +595,7 @@ nav a:hover {
   color: var(--text-muted);
   text-align: right;
   pointer-events: auto;
-  background: rgba(47, 47, 47, 0.85);
-  border: 1px solid var(--input-border);
-  border-radius: 999px;
-  padding: 0.35rem 0.65rem;
+  padding: 0;
 }
 
 .gallery-search-label {

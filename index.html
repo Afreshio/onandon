@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>on&on — Upload poetry</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <a href="index.html" class="logo">on&on</a>
+    <nav>
+      <a href="gallery.html">GALLERY</a>
+      <a href="about.html">ABOUT</a>
+    </nav>
+  </header>
+
+  <main id="home-view">
+    <section class="hero">
+      <h1>on&on</h1>
+      <p class="subtitle">Predictive text poetry.</p>
+      <div class="hero-content">
+        <form class="upload-form" id="upload-form">
+          <div class="upload-card">
+            <div class="poem-textarea-wrap">
+              <button
+                type="button"
+                id="instructions-trigger"
+                class="instructions-trigger"
+                aria-expanded="false"
+                aria-controls="inline-instructions"
+              >
+                How it Works
+              </button>
+              <div id="inline-instructions" class="inline-instructions" aria-label="Poem writing instructions">
+                <p class="inline-instructions-title">Phone only</p>
+                <p>Create your poem on a phone using the predictive text feature on the iPhone keyboard.</p>
+                <ul>
+                  <li>Choose the first word.</li>
+                  <li>Can be as short or long as desired.</li>
+                  <li>Don't think too much about the content.</li>
+                </ul>
+              </div>
+              <div id="poem-highlight" class="poem-highlight" aria-hidden="true"></div>
+              <textarea
+                id="poem-text"
+                class="poem-textarea"
+                placeholder="Write your poem here..."
+                aria-label="Write your poem"
+                maxlength="4000"
+                required
+              ></textarea>
+            </div>
+            <div class="upload-actions">
+              <button type="submit" class="btn-begin">Upload</button>
+              <a class="btn-gallery hidden" id="btn-gallery" href="gallery.html">View in gallery</a>
+            </div>
+            <p class="upload-status" id="upload-status" aria-live="polite"></p>
+          </div>
+        </form>
+      </div>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

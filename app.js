@@ -1,0 +1,130 @@
+/**
+ * Upload-based poetry app.
+ * Users submit full text poems that are saved to the gallery.
+ */
+
+const uploadForm = document.getElementById('upload-form');
+const poemTextInput = document.getElementById('poem-text');
+const poemHighlight = document.getElementById('poem-highlight');
+const uploadStatus = document.getElementById('upload-status');
+const btnGallery = document.getElementById('btn-gallery');
+
+const SAVED_POEMS_KEY = 'onandon_saved_poems';
+const API_POEMS_ENDPOINT = '/api/poems';
+
+if (poemTextInput && poemHighlight) {
+  poemTextInput.addEventListener('input', syncPoemHighlight);
+  poemTextInput.addEventListener('scroll', syncPoemHighlightScroll);
+  syncPoemHighlight();
+}
+
+uploadForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const poemText = normalizePoemText(poemTextInput.value);
+  const words = splitWords(poemText);
+
+  if (words.length < 2) {
+    setStatus('Please enter at least two words.', true);
+    return;
+  }
+
+  savePoem(poemText, words)
+    .then(() => {
+      poemTextInput.value = '';
+      syncPoemHighlight();
+      btnGallery.classList.remove('hidden');
+      setStatus('Poem uploaded. You can view it in the gallery.', false);
+    })
+    .catch(() => {
+      setStatus('Could not upload poem. Please try again.', true);
+    });
+});
+
+async function savePoem(poemText, words) {
+  const seedWord = deriveSeedWord(words[0]);
+  const newEntry = {
+    id: Date.now().toString(),
+    seedWord,
+    words: [...words],
+    text: poemText,
+    createdAt: Date.now(),
+  };
+
+  // Keep local storage in sync as a fallback/cache.
+  savePoemToLocal(newEntry);
+
+  try {
+    const response = await fetch(API_POEMS_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newEntry),
+    });
+    if (!response.ok) throw new Error('Request failed');
+  } catch {
+    // Offline/server-down fallback: local copy is already saved.
+  }
+}
+
+function normalizePoemText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function splitWords(text) {
+  return String(text || '').split(/\s+/).filter(Boolean);
+}
+
+function deriveSeedWord(firstWord) {
+  const cleaned = String(firstWord || 'Poem').replace(/[^\w]/g, '') || 'Poem';
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1).toLowerCase();
+}
+
+function setStatus(message, isError) {
+  uploadStatus.textContent = message;
+  uploadStatus.classList.toggle('error', Boolean(isError));
+}
+
+function savePoemToLocal(entry) {
+  const poems = loadSavedPoems();
+  poems.unshift(entry);
+  localStorage.setItem(SAVED_POEMS_KEY, JSON.stringify(poems.slice(0, 100)));
+}
+
+function loadSavedPoems() {
+  try {
+    const raw = localStorage.getItem(SAVED_POEMS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function syncPoemHighlight() {
+  if (!poemHighlight || !poemTextInput) return;
+  const value = poemTextInput.value || '';
+  if (!value) {
+    poemHighlight.textContent = '';
+    return;
+  }
+
+  const escaped = escapeHtml(value);
+  const highlighted = escaped.replace(/^(\s*)(\S+)/, '$1<span class="seed-word">$2</span>');
+  poemHighlight.innerHTML = highlighted.replace(/\n/g, '<br>');
+  syncPoemHighlightScroll();
+}
+
+function syncPoemHighlightScroll() {
+  if (!poemHighlight || !poemTextInput) return;
+  poemHighlight.scrollTop = poemTextInput.scrollTop;
+  poemHighlight.scrollLeft = poemTextInput.scrollLeft;
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}

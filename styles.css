@@ -625,6 +625,11 @@ nav a:hover {
   transition: opacity 0.35s ease;
 }
 
+.poem-block--deletable {
+  position: relative;
+  padding-right: 5.2rem;
+}
+
 .poem-block.is-active {
   opacity: 1;
 }
@@ -654,6 +659,34 @@ nav a:hover {
   color: var(--accent);
   font-weight: inherit;
   transition: color 0.3s ease;
+}
+
+.poem-delete-btn {
+  position: absolute;
+  top: 1rem;
+  right: 2rem;
+  border: 1px solid var(--input-border);
+  border-radius: 999px;
+  background: var(--bg-alt);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.28rem 0.62rem;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
+}
+
+.poem-delete-btn:hover {
+  border-color: #ff6f7f;
+  color: #ffd3d8;
+  background: rgba(255, 64, 87, 0.22);
+}
+
+.poem-delete-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .poem-block.is-dimmed .seed-word {

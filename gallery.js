@@ -11,7 +11,8 @@ async function initGallery() {
   await hydrateSavedPoems();
   const poemBlocks = Array.from(document.querySelectorAll('[data-poem]'));
   const refreshActivePoem = initScrollDimming(poemBlocks);
-  initSeedSearch(poemBlocks, refreshActivePoem);
+  const applySearch = initSeedSearch(poemBlocks, refreshActivePoem);
+  initDeletePoems(poemBlocks, refreshActivePoem, applySearch);
 }
 
 async function hydrateSavedPoems() {
@@ -25,14 +26,7 @@ async function hydrateSavedPoems() {
   const fragment = document.createDocumentFragment();
   saved.forEach((entry) => {
     if (!entry || !entry.seedWord || !entry.text) return;
-    const remainder = Array.isArray(entry.words)
-      ? entry.words.slice(1).join(' ')
-      : entry.text.split(/\s+/).slice(1).join(' ');
-    const article = document.createElement('article');
-    article.className = 'poem-block';
-    article.setAttribute('data-poem', '');
-    article.dataset.seed = normalizeSeed(entry.seedWord);
-    article.innerHTML = `<p><span class="seed-word">${escapeHtml(entry.seedWord)}</span>${remainder ? ` ${escapeHtml(remainder)}` : ''}</p>`;
+    const article = buildPoemBlock(entry, true);
     fragment.appendChild(article);
   });
 
@@ -143,6 +137,67 @@ function initSeedSearch(blocks, refreshActivePoem) {
 
   searchInput.addEventListener('input', applySearch);
   applySearch();
+  return applySearch;
+}
+
+function initDeletePoems(blocks, refreshActivePoem, applySearch) {
+  const stack = document.querySelector('.poem-stack');
+  if (!stack) return;
+
+  stack.addEventListener('click', async (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const deleteBtn = target.closest('[data-delete-poem]');
+    if (!deleteBtn) return;
+
+    const article = deleteBtn.closest('[data-poem]');
+    if (!article) return;
+    const poemId = String(article.dataset.poemId || '').trim();
+    if (!poemId) return;
+
+    const confirmed = window.confirm('Remove this poem from the gallery?');
+    if (!confirmed) return;
+
+    deleteBtn.setAttribute('disabled', 'true');
+    try {
+      await deletePoem(poemId);
+      removeLocalPoem(poemId);
+
+      const idx = blocks.indexOf(article);
+      if (idx >= 0) blocks.splice(idx, 1);
+      article.remove();
+
+      if (typeof applySearch === 'function') applySearch();
+      if (typeof refreshActivePoem === 'function') refreshActivePoem();
+    } catch {
+      deleteBtn.removeAttribute('disabled');
+      window.alert('Could not delete poem. Please try again.');
+    }
+  });
+}
+
+function buildPoemBlock(entry, isDeletable) {
+  const remainder = Array.isArray(entry.words)
+    ? entry.words.slice(1).join(' ')
+    : entry.text.split(/\s+/).slice(1).join(' ');
+  const article = document.createElement('article');
+  article.className = isDeletable ? 'poem-block poem-block--deletable' : 'poem-block';
+  article.setAttribute('data-poem', '');
+  article.dataset.seed = normalizeSeed(entry.seedWord);
+  if (entry.id) article.dataset.poemId = String(entry.id);
+  article.innerHTML = `<p><span class="seed-word">${escapeHtml(entry.seedWord)}</span>${remainder ? ` ${escapeHtml(remainder)}` : ''}</p>`;
+
+  if (isDeletable && entry.id) {
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.className = 'poem-delete-btn';
+    deleteButton.textContent = 'Delete';
+    deleteButton.setAttribute('data-delete-poem', '');
+    deleteButton.setAttribute('aria-label', `Delete poem starting with ${entry.seedWord}`);
+    article.appendChild(deleteButton);
+  }
+
+  return article;
 }
 
 function normalizeSeed(value) {
@@ -163,6 +218,13 @@ async function loadPoems() {
   }
 }
 
+async function deletePoem(id) {
+  const response = await fetch(`${API_POEMS_ENDPOINT}/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) throw new Error('Request failed');
+}
+
 function loadSavedPoems() {
   try {
     const raw = localStorage.getItem(SAVED_POEMS_KEY);
@@ -172,6 +234,12 @@ function loadSavedPoems() {
   } catch {
     return [];
   }
+}
+
+function removeLocalPoem(id) {
+  const poems = loadSavedPoems();
+  const nextPoems = poems.filter((entry) => String(entry?.id || '') !== String(id));
+  localStorage.setItem(SAVED_POEMS_KEY, JSON.stringify(nextPoems));
 }
 
 function mergePoems(remote, local) {

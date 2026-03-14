@@ -48,6 +48,29 @@ app.post('/api/poems', (req, res) => {
   res.status(201).json(entry);
 });
 
+app.delete('/api/poems/:id', (req, res) => {
+  const id = String(req.params.id || '').trim();
+  if (!id) {
+    res.status(400).json({ error: 'Poem id is required.' });
+    return;
+  }
+
+  const existingIndex = poemsStore.findIndex((poem) => String(poem.id || '') === id);
+  if (existingIndex < 0) {
+    res.status(404).json({ error: 'Poem not found.' });
+    return;
+  }
+
+  poemsStore.splice(existingIndex, 1);
+  const didPersist = persistPoemsStore(poemsStore.slice(0, 1000));
+  if (!didPersist) {
+    res.status(500).json({ error: 'Failed to delete poem.' });
+    return;
+  }
+
+  res.json({ ok: true, id });
+});
+
 app.use((req, res, next) => {
   if (req.method !== 'GET' || req.path.startsWith('/api/')) {
     next();

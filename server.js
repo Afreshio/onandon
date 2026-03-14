@@ -1,55 +1,24 @@
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
-const sqlite3 = require('sqlite3').verbose();
 
 const app = express();
 const PORT = Number(process.env.PORT || 8000);
 const DATA_DIR = path.join(__dirname, 'data');
-const DB_PATH = path.join(DATA_DIR, 'poems.db');
+const POEMS_PATH = path.join(DATA_DIR, 'poems.json');
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
-
-const db = new sqlite3.Database(DB_PATH);
-db.serialize(() => {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS poems (
-      id TEXT PRIMARY KEY,
-      seed_word TEXT NOT NULL,
-      words_json TEXT NOT NULL,
-      text TEXT NOT NULL,
-      created_at INTEGER NOT NULL
-    )
-  `);
-});
+const poemsStore = loadPoemsStore();
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(__dirname));
 
 app.get('/api/poems', (_req, res) => {
-  const sql = `
-    SELECT id, seed_word, words_json, text, created_at
-    FROM poems
-    ORDER BY created_at DESC
-    LIMIT 100
-  `;
-
-  db.all(sql, (err, rows = []) => {
-    if (err) {
-      res.status(500).json({ error: 'Failed to load poems.' });
-      return;
-    }
-
-    const poems = rows.map((row) => ({
-      id: row.id,
-      seedWord: row.seed_word,
-      words: safeParseWords(row.words_json),
-      text: row.text,
-      createdAt: row.created_at,
-    }));
-
-    res.json(poems);
-  });
+  const poems = poemsStore
+    .slice()
+    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+    .slice(0, 100);
+  res.json(poems);
 });
 
 app.post('/api/poems', (req, res) => {
@@ -65,25 +34,18 @@ app.post('/api/poems', (req, res) => {
     return;
   }
 
-  const insertSql = `
-    INSERT INTO poems (id, seed_word, words_json, text, created_at)
-    VALUES (?, ?, ?, ?, ?)
-  `;
+  const entry = { id, seedWord, words, text, createdAt };
+  const existingIndex = poemsStore.findIndex((p) => p.id === id);
+  if (existingIndex >= 0) poemsStore.splice(existingIndex, 1);
+  poemsStore.unshift(entry);
 
-  db.run(insertSql, [id, seedWord, JSON.stringify(words), text, createdAt], (err) => {
-    if (err) {
-      res.status(500).json({ error: 'Failed to save poem.' });
-      return;
-    }
+  const didPersist = persistPoemsStore(poemsStore.slice(0, 1000));
+  if (!didPersist) {
+    res.status(500).json({ error: 'Failed to save poem.' });
+    return;
+  }
 
-    res.status(201).json({
-      id,
-      seedWord,
-      words,
-      text,
-      createdAt,
-    });
-  });
+  res.status(201).json(entry);
 });
 
 app.use((req, res, next) => {
@@ -108,11 +70,22 @@ function deriveSeedWord(firstWord) {
   return cleaned.charAt(0).toUpperCase() + cleaned.slice(1).toLowerCase();
 }
 
-function safeParseWords(raw) {
+function loadPoemsStore() {
   try {
+    if (!fs.existsSync(POEMS_PATH)) return [];
+    const raw = fs.readFileSync(POEMS_PATH, 'utf8');
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
+  }
+}
+
+function persistPoemsStore(poems) {
+  try {
+    fs.writeFileSync(POEMS_PATH, JSON.stringify(poems, null, 2), 'utf8');
+    return true;
+  } catch {
+    return false;
   }
 }

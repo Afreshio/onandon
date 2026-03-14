@@ -13,8 +13,9 @@ const SAVED_POEMS_KEY = 'onandon_saved_poems';
 const API_POEMS_ENDPOINT = '/api/poems';
 
 if (poemTextInput && poemHighlight) {
-  poemTextInput.addEventListener('input', syncPoemHighlight);
+  poemTextInput.addEventListener('input', handlePoemInput);
   poemTextInput.addEventListener('scroll', syncPoemHighlightScroll);
+  ensureSeedWordCapitalized();
   syncPoemHighlight();
 }
 
@@ -71,6 +72,23 @@ function normalizePoemText(value) {
 
 function splitWords(text) {
   return String(text || '').split(/\s+/).filter(Boolean);
+}
+
+function handlePoemInput() {
+  ensureSeedWordCapitalized();
+  syncPoemHighlight();
+}
+
+function ensureSeedWordCapitalized() {
+  if (!poemTextInput) return;
+  const value = poemTextInput.value || '';
+  const nextValue = value.replace(/^(\s*)(\S)/, (_match, leading, firstChar) => `${leading}${firstChar.toUpperCase()}`);
+  if (nextValue === value) return;
+
+  const start = poemTextInput.selectionStart;
+  const end = poemTextInput.selectionEnd;
+  poemTextInput.value = nextValue;
+  poemTextInput.setSelectionRange(start, end);
 }
 
 function deriveSeedWord(firstWord) {

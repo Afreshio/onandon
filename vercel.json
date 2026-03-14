@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "server.js": {
+      "includeFiles": "{index.html,gallery.html,about.html,styles.css,app.js,gallery.js,poetry-engine.js,fonts/**,data/**}"
+    }
+  }
+}

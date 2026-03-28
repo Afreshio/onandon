@@ -214,16 +214,17 @@ function normalizeSeed(value) {
 }
 
 async function loadPoems() {
-  const local = loadSavedPoems();
-
   try {
     const response = await fetch(API_POEMS_ENDPOINT);
     if (!response.ok) throw new Error('Request failed');
     const remote = await response.json();
-    if (!Array.isArray(remote)) return local;
-    return mergePoems(remote, local);
+    if (!Array.isArray(remote)) return [];
+    return remote
+      .filter((entry) => entry && entry.text)
+      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+      .slice(0, 100);
   } catch {
-    return local;
+    return loadSavedPoems();
   }
 }
 
@@ -308,24 +309,6 @@ function removeLocalPoem(id) {
   const poems = loadSavedPoems();
   const nextPoems = poems.filter((entry) => String(entry?.id || '') !== String(id));
   localStorage.setItem(SAVED_POEMS_KEY, JSON.stringify(nextPoems));
-}
-
-function mergePoems(remote, local) {
-  const combined = [...remote, ...local];
-  const deduped = [];
-  const seen = new Set();
-
-  combined.forEach((entry) => {
-    if (!entry || !entry.text) return;
-    const key = `${entry.id || ''}|${entry.createdAt || ''}|${entry.text}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    deduped.push(entry);
-  });
-
-  return deduped
-    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
-    .slice(0, 100);
 }
 
 function escapeHtml(str) {

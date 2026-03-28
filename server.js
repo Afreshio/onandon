@@ -13,6 +13,8 @@ const USE_KV = Boolean(
   && process.env.KV_REST_API_TOKEN
 );
 const KV_INDEX_KEY = 'poems:index';
+const IS_VERCEL_RUNTIME = Boolean(process.env.VERCEL);
+const DURABLE_STORAGE_READY = USE_KV || !IS_VERCEL_RUNTIME;
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 const poemsStore = loadPoemsStore();
@@ -29,7 +31,10 @@ app.get('/api/poems', (_req, res) => {
 });
 
 app.get('/api/admin/config', (_req, res) => {
-  res.json({ deleteConfigured: Boolean(ADMIN_DELETE_TOKEN) });
+  res.json({
+    deleteConfigured: Boolean(ADMIN_DELETE_TOKEN),
+    storageConfigured: DURABLE_STORAGE_READY,
+  });
 });
 
 app.post('/api/poems', (req, res) => {
@@ -50,7 +55,11 @@ app.post('/api/poems', (req, res) => {
     .then(() => {
       res.status(201).json(entry);
     })
-    .catch(() => {
+    .catch((err) => {
+      if (err && err.code === 'STORAGE_NOT_CONFIGURED') {
+        res.status(503).json({ error: 'Poem storage is not configured on the server.' });
+        return;
+      }
       res.status(500).json({ error: 'Failed to save poem.' });
     });
 });
@@ -79,7 +88,11 @@ app.delete('/api/poems/:id', (req, res) => {
       }
       res.json({ ok: true, id });
     })
-    .catch(() => {
+    .catch((err) => {
+      if (err && err.code === 'STORAGE_NOT_CONFIGURED') {
+        res.status(503).json({ error: 'Poem storage is not configured on the server.' });
+        return;
+      }
       res.status(500).json({ error: 'Failed to delete poem.' });
     });
 });
@@ -152,12 +165,19 @@ async function listPoems() {
 }
 
 async function upsertPoem(entry) {
+  if (!DURABLE_STORAGE_READY) {
+    throw storageNotConfiguredError();
+  }
+
   if (!USE_KV) {
-    const existingIndex = poemsStore.findIndex((p) => String(p.id || '') === String(entry.id || ''));
-    if (existingIndex >= 0) poemsStore.splice(existingIndex, 1);
-    poemsStore.unshift(entry);
-    const didPersist = persistPoemsStore(poemsStore.slice(0, 1000));
+    const nextPoems = poemsStore.slice();
+    const existingIndex = nextPoems.findIndex((p) => String(p.id || '') === String(entry.id || ''));
+    if (existingIndex >= 0) nextPoems.splice(existingIndex, 1);
+    nextPoems.unshift(entry);
+    const trimmedPoems = nextPoems.slice(0, 1000);
+    const didPersist = persistPoemsStore(trimmedPoems);
     if (!didPersist) throw new Error('Persist failed');
+    poemsStore.splice(0, poemsStore.length, ...trimmedPoems);
     return;
   }
 
@@ -172,13 +192,20 @@ async function upsertPoem(entry) {
 }
 
 async function deletePoem(id) {
+  if (!DURABLE_STORAGE_READY) {
+    throw storageNotConfiguredError();
+  }
+
   if (!USE_KV) {
-    const existingIndex = poemsStore.findIndex((poem) => String(poem.id || '') === String(id));
+    const nextPoems = poemsStore.slice();
+    const existingIndex = nextPoems.findIndex((poem) => String(poem.id || '') === String(id));
     if (existingIndex < 0) return false;
 
-    poemsStore.splice(existingIndex, 1);
-    const didPersist = persistPoemsStore(poemsStore.slice(0, 1000));
+    nextPoems.splice(existingIndex, 1);
+    const trimmedPoems = nextPoems.slice(0, 1000);
+    const didPersist = persistPoemsStore(trimmedPoems);
     if (!didPersist) throw new Error('Persist failed');
+    poemsStore.splice(0, poemsStore.length, ...trimmedPoems);
     return true;
   }
 
@@ -192,4 +219,10 @@ async function deletePoem(id) {
   const nextIds = normalizedIds.filter((existingId) => existingId !== id).slice(0, 1000);
   await kv.set(KV_INDEX_KEY, nextIds);
   return true;
+}
+
+function storageNotConfiguredError() {
+  const err = new Error('Durable poem storage is not configured.');
+  err.code = 'STORAGE_NOT_CONFIGURED';
+  return err;
 }

@@ -30,11 +30,15 @@ uploadForm.addEventListener('submit', (e) => {
   }
 
   savePoem(poemText, words)
-    .then(() => {
+    .then((result) => {
       poemTextInput.value = '';
       syncPoemHighlight();
       btnGallery.classList.remove('hidden');
-      setStatus('Poem uploaded. You can view it in the gallery.', false);
+      if (result && result.synced) {
+        setStatus('Poem uploaded. You can view it in the gallery.', false);
+      } else {
+        setStatus('Saved only on this device. Server storage is currently unavailable.', true);
+      }
     })
     .catch(() => {
       setStatus('Could not upload poem. Please try again.', true);
@@ -51,9 +55,6 @@ async function savePoem(poemText, words) {
     createdAt: Date.now(),
   };
 
-  // Keep local storage in sync as a fallback/cache.
-  savePoemToLocal(newEntry);
-
   try {
     const response = await fetch(API_POEMS_ENDPOINT, {
       method: 'POST',
@@ -61,8 +62,11 @@ async function savePoem(poemText, words) {
       body: JSON.stringify(newEntry),
     });
     if (!response.ok) throw new Error('Request failed');
+    return { synced: true };
   } catch {
-    // Offline/server-down fallback: local copy is already saved.
+    // Fallback so users keep their poem locally even if server is unavailable.
+    savePoemToLocal(newEntry);
+    return { synced: false };
   }
 }
 

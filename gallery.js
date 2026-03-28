@@ -3,6 +3,7 @@
  */
 
 const SAVED_POEMS_KEY = 'onandon_saved_poems';
+const LAST_UPLOADED_POEM_KEY = 'onandon_last_uploaded_poem';
 const ADMIN_TOKEN_KEY = 'onandon_admin_delete_token';
 const API_POEMS_ENDPOINT = '/api/poems';
 const API_ADMIN_CONFIG_ENDPOINT = '/api/admin/config';
@@ -178,9 +179,24 @@ function initDeletePoems(blocks, refreshActivePoem, applySearch) {
 
       if (typeof applySearch === 'function') applySearch();
       if (typeof refreshActivePoem === 'function') refreshActivePoem();
-    } catch {
+    } catch (err) {
+      if (err && err.status === 404) {
+        // If the poem is already absent from server storage, remove stale local UI entry.
+        removeLocalPoem(poemId);
+        const idx = blocks.indexOf(article);
+        if (idx >= 0) blocks.splice(idx, 1);
+        article.remove();
+        if (typeof applySearch === 'function') applySearch();
+        if (typeof refreshActivePoem === 'function') refreshActivePoem();
+        return;
+      }
+
       deleteBtn.removeAttribute('disabled');
-      window.alert('Could not delete poem. Check admin token and try again.');
+      if (err && err.status === 403) {
+        window.alert('Admin token is invalid. Unlock admin again and retry.');
+        return;
+      }
+      window.alert('Could not delete poem right now. Please try again.');
     }
   });
 }
@@ -214,17 +230,27 @@ function normalizeSeed(value) {
 }
 
 async function loadPoems() {
+  const lastUploaded = loadLastUploadedPoem();
   try {
     const response = await fetch(API_POEMS_ENDPOINT);
     if (!response.ok) throw new Error('Request failed');
     const remote = await response.json();
     if (!Array.isArray(remote)) return [];
-    return remote
+    const deduped = dedupePoems(lastUploaded ? [lastUploaded, ...remote] : remote);
+    const remoteHasLastUploaded = Boolean(
+      lastUploaded && remote.some((entry) => String(entry?.id || '') === String(lastUploaded.id || '')),
+    );
+    if (remoteHasLastUploaded) clearLastUploadedPoem();
+    return deduped
       .filter((entry) => entry && entry.text)
       .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
       .slice(0, 100);
   } catch {
-    return loadSavedPoems();
+    const local = loadSavedPoems();
+    return dedupePoems(lastUploaded ? [lastUploaded, ...local] : local)
+      .filter((entry) => entry && entry.text)
+      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+      .slice(0, 100);
   }
 }
 
@@ -236,7 +262,18 @@ async function deletePoem(id) {
       'x-admin-token': adminToken,
     },
   });
-  if (!response.ok) throw new Error('Request failed');
+  if (response.ok) return;
+
+  let errorBody = null;
+  try {
+    errorBody = await response.json();
+  } catch {
+    // Ignore parse errors and use status code.
+  }
+
+  const err = new Error((errorBody && errorBody.error) || 'Request failed');
+  err.status = response.status;
+  throw err;
 }
 
 async function initAdminControls() {
@@ -309,6 +346,44 @@ function removeLocalPoem(id) {
   const poems = loadSavedPoems();
   const nextPoems = poems.filter((entry) => String(entry?.id || '') !== String(id));
   localStorage.setItem(SAVED_POEMS_KEY, JSON.stringify(nextPoems));
+  const lastUploaded = loadLastUploadedPoem();
+  if (lastUploaded && String(lastUploaded.id || '') === String(id)) {
+    clearLastUploadedPoem();
+  }
+}
+
+function loadLastUploadedPoem() {
+  try {
+    const raw = sessionStorage.getItem(LAST_UPLOADED_POEM_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !parsed.id || !parsed.text) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function clearLastUploadedPoem() {
+  try {
+    sessionStorage.removeItem(LAST_UPLOADED_POEM_KEY);
+  } catch {
+    // no-op
+  }
+}
+
+function dedupePoems(list) {
+  const deduped = [];
+  const seen = new Set();
+  list.forEach((entry) => {
+    if (!entry || !entry.text) return;
+    const id = String(entry.id || '');
+    const key = id || `${entry.createdAt || ''}|${entry.text}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    deduped.push(entry);
+  });
+  return deduped;
 }
 
 function escapeHtml(str) {

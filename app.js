@@ -10,6 +10,7 @@ const uploadStatus = document.getElementById('upload-status');
 const btnGallery = document.getElementById('btn-gallery');
 
 const SAVED_POEMS_KEY = 'onandon_saved_poems';
+const LAST_UPLOADED_POEM_KEY = 'onandon_last_uploaded_poem';
 const API_POEMS_ENDPOINT = '/api/poems';
 
 if (poemTextInput && poemHighlight) {
@@ -31,6 +32,9 @@ uploadForm.addEventListener('submit', (e) => {
 
   savePoem(poemText, words)
     .then((result) => {
+      if (result && result.entry) {
+        rememberLastUploadedPoem(result.entry);
+      }
       poemTextInput.value = '';
       syncPoemHighlight();
       btnGallery.classList.remove('hidden');
@@ -62,11 +66,11 @@ async function savePoem(poemText, words) {
       body: JSON.stringify(newEntry),
     });
     if (!response.ok) throw new Error('Request failed');
-    return { synced: true };
+    return { synced: true, entry: newEntry };
   } catch {
     // Fallback so users keep their poem locally even if server is unavailable.
     savePoemToLocal(newEntry);
-    return { synced: false };
+    return { synced: false, entry: newEntry };
   }
 }
 
@@ -109,6 +113,14 @@ function savePoemToLocal(entry) {
   const poems = loadSavedPoems();
   poems.unshift(entry);
   localStorage.setItem(SAVED_POEMS_KEY, JSON.stringify(poems.slice(0, 100)));
+}
+
+function rememberLastUploadedPoem(entry) {
+  try {
+    sessionStorage.setItem(LAST_UPLOADED_POEM_KEY, JSON.stringify(entry));
+  } catch {
+    // no-op
+  }
 }
 
 function loadSavedPoems() {

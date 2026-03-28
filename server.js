@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const { kv } = require('@vercel/kv');
+const { get, put } = require('@vercel/blob');
 
 const app = express();
 const PORT = Number(process.env.PORT || 8000);
@@ -12,9 +13,11 @@ const USE_KV = Boolean(
   process.env.KV_REST_API_URL
   && process.env.KV_REST_API_TOKEN
 );
+const USE_BLOB = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 const KV_INDEX_KEY = 'poems:index';
+const BLOB_POEMS_PATH = 'poems-store.json';
 const IS_VERCEL_RUNTIME = Boolean(process.env.VERCEL);
-const DURABLE_STORAGE_READY = USE_KV || !IS_VERCEL_RUNTIME;
+const DURABLE_STORAGE_READY = USE_KV || USE_BLOB || !IS_VERCEL_RUNTIME;
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 const poemsStore = loadPoemsStore();
@@ -145,6 +148,14 @@ function isAdminAuthorized(req) {
 }
 
 async function listPoems() {
+  if (USE_BLOB) {
+    const poems = await loadPoemsFromBlob();
+    return poems
+      .filter((entry) => entry && entry.text)
+      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+      .slice(0, 100);
+  }
+
   if (!USE_KV) {
     return poemsStore
       .slice()
@@ -167,6 +178,15 @@ async function listPoems() {
 async function upsertPoem(entry) {
   if (!DURABLE_STORAGE_READY) {
     throw storageNotConfiguredError();
+  }
+
+  if (USE_BLOB) {
+    const poems = await loadPoemsFromBlob();
+    const existingIndex = poems.findIndex((p) => String(p.id || '') === String(entry.id || ''));
+    if (existingIndex >= 0) poems.splice(existingIndex, 1);
+    poems.unshift(entry);
+    await persistPoemsToBlob(poems.slice(0, 1000));
+    return;
   }
 
   if (!USE_KV) {
@@ -194,6 +214,15 @@ async function upsertPoem(entry) {
 async function deletePoem(id) {
   if (!DURABLE_STORAGE_READY) {
     throw storageNotConfiguredError();
+  }
+
+  if (USE_BLOB) {
+    const poems = await loadPoemsFromBlob();
+    const existingIndex = poems.findIndex((poem) => String(poem.id || '') === String(id));
+    if (existingIndex < 0) return false;
+    poems.splice(existingIndex, 1);
+    await persistPoemsToBlob(poems.slice(0, 1000));
+    return true;
   }
 
   if (!USE_KV) {
@@ -225,4 +254,47 @@ function storageNotConfiguredError() {
   const err = new Error('Durable poem storage is not configured.');
   err.code = 'STORAGE_NOT_CONFIGURED';
   return err;
+}
+
+async function loadPoemsFromBlob() {
+  let response;
+  try {
+    response = await get(BLOB_POEMS_PATH, { access: 'public' });
+  } catch (err) {
+    const message = String(err && err.message ? err.message : '');
+    if (message.toLowerCase().includes('not found')) return [];
+    throw err;
+  }
+  if (!response || response.statusCode !== 200 || !response.stream) return [];
+
+  const raw = await readReadableStream(response.stream);
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function persistPoemsToBlob(poems) {
+  await put(BLOB_POEMS_PATH, JSON.stringify(poems), {
+    access: 'public',
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    contentType: 'application/json',
+    cacheControlMaxAge: 0,
+  });
+}
+
+async function readReadableStream(stream) {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let out = '';
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    out += decoder.decode(chunk.value, { stream: true });
+  }
+  out += decoder.decode();
+  return out;
 }

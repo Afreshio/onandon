@@ -1,12 +1,18 @@
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
+const { kv } = require('@vercel/kv');
 
 const app = express();
 const PORT = Number(process.env.PORT || 8000);
 const DATA_DIR = path.join(__dirname, 'data');
 const POEMS_PATH = path.join(DATA_DIR, 'poems.json');
 const ADMIN_DELETE_TOKEN = String(process.env.ADMIN_DELETE_TOKEN || '').trim();
+const USE_KV = Boolean(
+  process.env.KV_REST_API_URL
+  && process.env.KV_REST_API_TOKEN
+);
+const KV_INDEX_KEY = 'poems:index';
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 const poemsStore = loadPoemsStore();
@@ -15,11 +21,11 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.static(__dirname));
 
 app.get('/api/poems', (_req, res) => {
-  const poems = poemsStore
-    .slice()
-    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
-    .slice(0, 100);
-  res.json(poems);
+  listPoems()
+    .then((poems) => res.json(poems))
+    .catch(() => {
+      res.status(500).json({ error: 'Failed to load poems.' });
+    });
 });
 
 app.get('/api/admin/config', (_req, res) => {
@@ -40,17 +46,13 @@ app.post('/api/poems', (req, res) => {
   }
 
   const entry = { id, seedWord, words, text, createdAt };
-  const existingIndex = poemsStore.findIndex((p) => p.id === id);
-  if (existingIndex >= 0) poemsStore.splice(existingIndex, 1);
-  poemsStore.unshift(entry);
-
-  const didPersist = persistPoemsStore(poemsStore.slice(0, 1000));
-  if (!didPersist) {
-    res.status(500).json({ error: 'Failed to save poem.' });
-    return;
-  }
-
-  res.status(201).json(entry);
+  upsertPoem(entry)
+    .then(() => {
+      res.status(201).json(entry);
+    })
+    .catch(() => {
+      res.status(500).json({ error: 'Failed to save poem.' });
+    });
 });
 
 app.delete('/api/poems/:id', (req, res) => {
@@ -69,20 +71,17 @@ app.delete('/api/poems/:id', (req, res) => {
     return;
   }
 
-  const existingIndex = poemsStore.findIndex((poem) => String(poem.id || '') === id);
-  if (existingIndex < 0) {
-    res.status(404).json({ error: 'Poem not found.' });
-    return;
-  }
-
-  poemsStore.splice(existingIndex, 1);
-  const didPersist = persistPoemsStore(poemsStore.slice(0, 1000));
-  if (!didPersist) {
-    res.status(500).json({ error: 'Failed to delete poem.' });
-    return;
-  }
-
-  res.json({ ok: true, id });
+  deletePoem(id)
+    .then((deleted) => {
+      if (!deleted) {
+        res.status(404).json({ error: 'Poem not found.' });
+        return;
+      }
+      res.json({ ok: true, id });
+    })
+    .catch(() => {
+      res.status(500).json({ error: 'Failed to delete poem.' });
+    });
 });
 
 app.use((req, res, next) => {
@@ -130,4 +129,67 @@ function persistPoemsStore(poems) {
 function isAdminAuthorized(req) {
   const suppliedToken = String(req.get('x-admin-token') || '').trim();
   return suppliedToken.length > 0 && suppliedToken === ADMIN_DELETE_TOKEN;
+}
+
+async function listPoems() {
+  if (!USE_KV) {
+    return poemsStore
+      .slice()
+      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+      .slice(0, 100);
+  }
+
+  const ids = await kv.get(KV_INDEX_KEY);
+  const normalizedIds = Array.isArray(ids) ? ids.map((v) => String(v || '')).filter(Boolean) : [];
+  if (normalizedIds.length === 0) return [];
+
+  const keys = normalizedIds.slice(0, 100).map((id) => `poems:data:${id}`);
+  const rows = await kv.mget(...keys);
+  return rows
+    .filter((row) => row && typeof row === 'object')
+    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+    .slice(0, 100);
+}
+
+async function upsertPoem(entry) {
+  if (!USE_KV) {
+    const existingIndex = poemsStore.findIndex((p) => String(p.id || '') === String(entry.id || ''));
+    if (existingIndex >= 0) poemsStore.splice(existingIndex, 1);
+    poemsStore.unshift(entry);
+    const didPersist = persistPoemsStore(poemsStore.slice(0, 1000));
+    if (!didPersist) throw new Error('Persist failed');
+    return;
+  }
+
+  const id = String(entry.id || '').trim();
+  if (!id) throw new Error('Invalid id');
+
+  await kv.set(`poems:data:${id}`, entry);
+  const ids = await kv.get(KV_INDEX_KEY);
+  const normalizedIds = Array.isArray(ids) ? ids.map((v) => String(v || '')).filter(Boolean) : [];
+  const nextIds = [id, ...normalizedIds.filter((existingId) => existingId !== id)].slice(0, 1000);
+  await kv.set(KV_INDEX_KEY, nextIds);
+}
+
+async function deletePoem(id) {
+  if (!USE_KV) {
+    const existingIndex = poemsStore.findIndex((poem) => String(poem.id || '') === String(id));
+    if (existingIndex < 0) return false;
+
+    poemsStore.splice(existingIndex, 1);
+    const didPersist = persistPoemsStore(poemsStore.slice(0, 1000));
+    if (!didPersist) throw new Error('Persist failed');
+    return true;
+  }
+
+  const key = `poems:data:${id}`;
+  const existing = await kv.get(key);
+  if (!existing) return false;
+
+  await kv.del(key);
+  const ids = await kv.get(KV_INDEX_KEY);
+  const normalizedIds = Array.isArray(ids) ? ids.map((v) => String(v || '')).filter(Boolean) : [];
+  const nextIds = normalizedIds.filter((existingId) => existingId !== id).slice(0, 1000);
+  await kv.set(KV_INDEX_KEY, nextIds);
+  return true;
 }

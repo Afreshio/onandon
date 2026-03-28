@@ -259,7 +259,10 @@ function storageNotConfiguredError() {
 async function loadPoemsFromBlob() {
   let response;
   try {
-    response = await get(BLOB_POEMS_PATH, { access: 'public' });
+    response = await get(BLOB_POEMS_PATH, {
+      access: 'private',
+      useCache: false,
+    });
   } catch (err) {
     const message = String(err && err.message ? err.message : '');
     if (message.toLowerCase().includes('not found')) return [];
@@ -278,7 +281,7 @@ async function loadPoemsFromBlob() {
 
 async function persistPoemsToBlob(poems) {
   await put(BLOB_POEMS_PATH, JSON.stringify(poems), {
-    access: 'public',
+    access: 'private',
     addRandomSuffix: false,
     allowOverwrite: true,
     contentType: 'application/json',
